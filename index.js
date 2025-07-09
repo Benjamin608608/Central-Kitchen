@@ -189,7 +189,7 @@ async function fetchAndPostPDF() {
         }
         
         // 發送開始訊息
-        await channel.send('🔄 開始下載並處理PDF文件...');
+        //await channel.send('🔄 開始下載並處理PDF文件...');
         
         // 獲取PDF連結
         const pdfLink = await getPDFLink();
@@ -235,8 +235,8 @@ async function fetchAndPostPDF() {
             }
         }
         
-        await channel.send('✅ PDF內容發布完成！');
-        console.log('PDF內容發布完成');
+        //await channel.send('✅ PDF內容發布完成！');
+        //console.log('PDF內容發布完成');
         
     } catch (error) {
         console.error('執行任務時發生錯誤:', error);
@@ -258,7 +258,7 @@ client.once('ready', () => {
     
     // 設定每週五中午12點執行
     // 分 時 日 月 週
-    cron.schedule('21 10 * * 3', () => {
+    cron.schedule('0 12 * * 5', () => {
         console.log('定時任務觸發 - 每週五中午12點');
         fetchAndPostPDF();
     }, {
@@ -276,9 +276,9 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
     // 手動觸發PDF下載
-    if (message.content === '!pdf' && message.channelId === CHANNEL_ID) {
-        await message.reply('🔄 開始手動執行PDF下載任務...');
-        await fetchAndPostPDF();
+    //if (message.content === '!pdf' && message.channelId === CHANNEL_ID) {
+        //await message.reply('🔄 開始手動執行PDF下載任務...');
+        //await fetchAndPostPDF();
     }
     
     // 測試指令
