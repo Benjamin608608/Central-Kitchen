@@ -360,11 +360,11 @@ async function fetchAndPostPDF() {
         
         await channel.send(`📄 **${dateString} 中央廚房菜單**\n🔗 原始連結: ${pdfLink}\n\n**📋 菜單內容:**`);
         
-        // 分割並發送文字內容
+        // 分割並發送文字內容（不使用代碼區塊）
         const messages = splitMessage(formattedText);
         
         for (let i = 0; i < messages.length; i++) {
-            await channel.send(`\`\`\`\n${messages[i]}\n\`\`\``);
+            await channel.send(messages[i]);
             
             // 避免觸發Discord的速率限制
             if (i < messages.length - 1) {
