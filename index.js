@@ -188,10 +188,7 @@ async function fetchAndPostPDF() {
             return;
         }
         
-        // 發送開始訊息
-        //await channel.send('🔄 開始下載並處理PDF文件...');
-        
-        // 獲取PDF連結
+        // 獲取PDF連結（移除開始訊息）
         const pdfLink = await getPDFLink();
         if (!pdfLink) {
             await channel.send('❌ 無法找到PDF連結');
@@ -235,8 +232,7 @@ async function fetchAndPostPDF() {
             }
         }
         
-        //await channel.send('✅ PDF內容發布完成！');
-        //console.log('PDF內容發布完成');
+        console.log('PDF內容發布完成');
         
     } catch (error) {
         console.error('執行任務時發生錯誤:', error);
@@ -276,9 +272,8 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
     // 手動觸發PDF下載
-    //if (message.content === '!pdf' && message.channelId === CHANNEL_ID) {
-        //await message.reply('🔄 開始手動執行PDF下載任務...');
-        //await fetchAndPostPDF();
+    if (message.content === '!pdf' && message.channelId === CHANNEL_ID) {
+        await fetchAndPostPDF();
     }
     
     // 測試指令
