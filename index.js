@@ -144,15 +144,125 @@ async function extractTextFromPDF(pdfBuffer) {
     }
 }
 
-// 清理和格式化文字
+// 改進的文字格式化，保留更多原始排版
 function formatText(text) {
-    return text
-        .replace(/\s+/g, ' ') // 多個空白字符替換為單個空格
-        .replace(/\n\s*\n/g, '\n') // 多個換行替換為單個換行
+    // 首先進行基本清理，但保留更多原始結構
+    let formatted = text
+        .replace(/\r\n/g, '\n') // 統一換行符
+        .replace(/\r/g, '\n')   // 統一換行符
+        .replace(/\t/g, '    ') // 將tab轉換為4個空格
+        .replace(/[ \u00A0]+$/gm, '') // 移除行尾空格
+        .replace(/^\s*\n/gm, '\n') // 移除只有空格的行
         .trim();
+    
+    // 智能識別並加粗標題
+    formatted = addBoldToTitles(formatted);
+    
+    // 保留表格結構和對齊
+    formatted = preserveTableStructure(formatted);
+    
+    return formatted;
 }
 
-// 將長文本分割成多個訊息
+// 智能識別標題並加粗
+function addBoldToTitles(text) {
+    const lines = text.split('\n');
+    const processedLines = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        const trimmedLine = line.trim();
+        
+        // 識別可能的標題模式
+        const titlePatterns = [
+            // 日期標題 (2024年7月9日, 7月9日等)
+            /^(\d{4}年\d{1,2}月\d{1,2}日.*|^\d{1,2}月\d{1,2}日.*)/,
+            // 餐次標題 (早餐、午餐、晚餐、點心等)
+            /^(早餐|午餐|晚餐|點心|宵夜|下午茶).*$/,
+            // 菜單、中央廚房等標題
+            /^(菜單|中央廚房|餐點|食譜).*$/,
+            // 短行且看起來像標題 (長度<20且包含中文)
+            /^[\u4e00-\u9fff\s]{2,15}$/,
+            // 全大寫英文標題
+            /^[A-Z\s]{3,20}$/,
+            // 數字開頭的項目 (1. 2. 3. 或 一、二、三、)
+            /^(\d+[\.、]|[一二三四五六七八九十]+[、．])/
+        ];
+        
+        let isTitle = false;
+        
+        // 檢查是否符合標題模式
+        for (const pattern of titlePatterns) {
+            if (pattern.test(trimmedLine)) {
+                isTitle = true;
+                break;
+            }
+        }
+        
+        // 額外的標題判斷邏輯
+        if (!isTitle && trimmedLine.length > 0) {
+            // 如果這行很短，下一行是空行或內容，可能是標題
+            const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+            if (trimmedLine.length <= 20 && 
+                (nextLine === '' || nextLine.length > trimmedLine.length) &&
+                /[\u4e00-\u9fff]/.test(trimmedLine)) {
+                isTitle = true;
+            }
+            
+            // 如果前一行是空行，這行較短且包含中文，可能是標題
+            const prevLine = i > 0 ? lines[i - 1].trim() : '';
+            if (prevLine === '' && trimmedLine.length <= 25 && 
+                /[\u4e00-\u9fff]/.test(trimmedLine) && 
+                !/[\d]{2,}/.test(trimmedLine)) {
+                isTitle = true;
+            }
+        }
+        
+        // 如果識別為標題且尚未加粗，則加粗
+        if (isTitle && trimmedLine.length > 0 && !trimmedLine.includes('**')) {
+            // 保留原始縮進
+            const leadingSpaces = line.match(/^(\s*)/)[1];
+            processedLines.push(leadingSpaces + '**' + trimmedLine + '**');
+        } else {
+            processedLines.push(line);
+        }
+    }
+    
+    return processedLines.join('\n');
+}
+
+// 保留表格結構和對齊
+function preserveTableStructure(text) {
+    const lines = text.split('\n');
+    const processedLines = [];
+    
+    for (let line of lines) {
+        // 檢測可能的表格行（包含多個空格分隔的項目）
+        if (line.includes('  ') && line.trim().length > 0) {
+            // 保留多個空格作為分隔符，但規範化為統一格式
+            line = line.replace(/\s{2,}/g, '  '); // 多個空格統一為兩個空格
+            
+            // 如果看起來像表格頭部或分隔線，可能需要加粗
+            const trimmed = line.trim();
+            if (trimmed.includes('─') || trimmed.includes('═') || 
+                trimmed.includes('|') || trimmed.includes('│')) {
+                // 保留表格線條
+                processedLines.push(line);
+            } else if (trimmed.split(/\s{2,}/).length >= 3) {
+                // 可能是表格數據行，保留原樣
+                processedLines.push(line);
+            } else {
+                processedLines.push(line);
+            }
+        } else {
+            processedLines.push(line);
+        }
+    }
+    
+    return processedLines.join('\n');
+}
+
+// 改進的文本分割，保留排版結構
 function splitMessage(text, maxLength = 1900) {
     const messages = [];
     let currentMessage = '';
@@ -160,21 +270,51 @@ function splitMessage(text, maxLength = 1900) {
     const lines = text.split('\n');
     
     for (const line of lines) {
-        if (currentMessage.length + line.length + 1 > maxLength) {
+        // 計算加入這行後的長度
+        const lineToAdd = currentMessage === '' ? line : '\n' + line;
+        
+        if (currentMessage.length + lineToAdd.length > maxLength) {
+            // 如果當前消息不為空，保存它
             if (currentMessage.trim()) {
                 messages.push(currentMessage.trim());
             }
-            currentMessage = line;
+            
+            // 檢查單行是否超過限制
+            if (line.length > maxLength) {
+                // 單行太長，需要進一步分割，但盡量保持完整性
+                const words = line.split(' ');
+                let currentPart = '';
+                
+                for (const word of words) {
+                    if (currentPart.length + word.length + 1 > maxLength) {
+                        if (currentPart.trim()) {
+                            messages.push(currentPart.trim());
+                        }
+                        currentPart = word;
+                    } else {
+                        currentPart += (currentPart === '' ? '' : ' ') + word;
+                    }
+                }
+                
+                if (currentPart.trim()) {
+                    currentMessage = currentPart;
+                } else {
+                    currentMessage = '';
+                }
+            } else {
+                currentMessage = line;
+            }
         } else {
-            currentMessage += (currentMessage ? '\n' : '') + line;
+            currentMessage += lineToAdd;
         }
     }
     
+    // 添加最後的消息
     if (currentMessage.trim()) {
         messages.push(currentMessage.trim());
     }
     
-    return messages;
+    return messages.length > 0 ? messages : ['無內容'];
 }
 
 // 主要功能函數
