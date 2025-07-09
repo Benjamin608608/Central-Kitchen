@@ -258,7 +258,7 @@ client.once('ready', () => {
     
     // 設定每週五中午12點執行
     // 分 時 日 月 週
-    cron.schedule('0 12 * * 5', () => {
+    cron.schedule('21 10 * * 3', () => {
         console.log('定時任務觸發 - 每週五中午12點');
         fetchAndPostPDF();
     }, {
