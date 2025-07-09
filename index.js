@@ -18,6 +18,37 @@ const client = new Client({
     ]
 });
 
+// 計算前一個週日的日期
+function getPreviousSunday() {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=星期日, 1=星期一, ..., 6=星期六
+    
+    // 如果今天是星期日，回推7天到上個星期日
+    // 如果今天是星期一，回推1天到昨天的星期日
+    // 如果今天是星期二，回推2天到前天的星期日
+    // 以此類推...
+    const daysToSubtract = dayOfWeek === 0 ? 7 : dayOfWeek;
+    
+    const previousSunday = new Date(now);
+    previousSunday.setDate(now.getDate() - daysToSubtract);
+    
+    console.log('今天是:', now.toLocaleDateString('zh-TW', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long'
+    }));
+    
+    console.log('計算前一個週日:', previousSunday.toLocaleDateString('zh-TW', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long'
+    }));
+    
+    return previousSunday;
+}
+
 // 下載PDF的函數
 async function downloadPDF(pdfUrl) {
     try {
@@ -100,6 +131,7 @@ async function extractTextFromPDF(pdfBuffer) {
     try {
         console.log('開始提取PDF文字...');
         const data = await pdf(pdfBuffer, {
+            // PDF解析選項
             max: 0, // 最大頁數，0表示不限制
             version: 'v1.10.100' // 指定pdf2pic版本
         });
@@ -110,111 +142,6 @@ async function extractTextFromPDF(pdfBuffer) {
         console.error('PDF文字提取失敗:', error.message);
         throw error;
     }
-}
-
-// 從PDF內容中提取日期
-function extractDateFromPDF(text) {
-    console.log('開始從PDF內容提取日期...');
-    
-    // 常見的日期格式匹配
-    const datePatterns = [
-        // 2024年7月9日 星期二
-        /(\d{4})年(\d{1,2})月(\d{1,2})日\s*([星期週][一二三四五六日天])?/,
-        // 2024/7/9 週二
-        /(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})\s*([週星期][一二三四五六日天])?/,
-        // 7月9日星期二
-        /(\d{1,2})月(\d{1,2})日\s*([星期週][一二三四五六日天])/,
-        // 113年7月9日 (民國年)
-        /(\d{2,3})年(\d{1,2})月(\d{1,2})日/,
-        // 07-09 或 7-9
-        /(\d{1,2})-(\d{1,2})/,
-        // July 9, 2024 或 9 July 2024
-        /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})/i,
-        // 9 Jul 2024
-        /(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})/i
-    ];
-    
-    // 在PDF文字的前幾行中尋找日期
-    const lines = text.split('\n').slice(0, 10); // 只搜索前10行
-    
-    for (const line of lines) {
-        console.log('檢查行:', line.trim());
-        
-        for (const pattern of datePatterns) {
-            const match = line.match(pattern);
-            if (match) {
-                console.log('找到日期匹配:', match[0]);
-                
-                try {
-                    let year, month, day, weekday;
-                    
-                    if (pattern.toString().includes('年.*月.*日')) {
-                        // 中文格式: 2024年7月9日
-                        year = parseInt(match[1]);
-                        month = parseInt(match[2]);
-                        day = parseInt(match[3]);
-                        weekday = match[4] || '';
-                        
-                        // 處理民國年
-                        if (year < 1000) {
-                            year += 1911; // 民國年轉西元年
-                        }
-                    } else if (pattern.toString().includes('[\/\\-]')) {
-                        // 斜線格式: 2024/7/9
-                        year = parseInt(match[1]);
-                        month = parseInt(match[2]);
-                        day = parseInt(match[3]);
-                        weekday = match[4] || '';
-                    } else if (pattern.toString().includes('month.*day')) {
-                        // 只有月日: 7月9日
-                        const currentYear = new Date().getFullYear();
-                        year = currentYear;
-                        month = parseInt(match[1]);
-                        day = parseInt(match[2]);
-                        weekday = match[3] || '';
-                    }
-                    
-                    if (year && month && day) {
-                        const extractedDate = new Date(year, month - 1, day);
-                        
-                        // 驗證日期是否合理（不能太舊或太新）
-                        const now = new Date();
-                        const diffDays = Math.abs((extractedDate - now) / (1000 * 60 * 60 * 24));
-                        
-                        if (diffDays <= 30) { // 30天內的日期才認為有效
-                            console.log('成功提取日期:', extractedDate);
-                            return { date: extractedDate, originalText: match[0], weekday };
-                        }
-                    }
-                } catch (error) {
-                    console.log('日期解析錯誤:', error.message);
-                    continue;
-                }
-            }
-        }
-    }
-    
-    console.log('無法從PDF中提取有效日期，使用當前日期');
-    return null;
-}
-
-// 格式化日期為中文
-function formatChineseDate(date, weekday = '') {
-    const options = {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        weekday: 'long'
-    };
-    
-    let dateString = date.toLocaleDateString('zh-TW', options);
-    
-    // 如果PDF中有星期資訊，優先使用PDF中的
-    if (weekday) {
-        dateString = dateString.replace(/星期[一二三四五六日天]/, weekday);
-    }
-    
-    return dateString;
 }
 
 // 清理和格式化文字
@@ -285,21 +212,15 @@ async function fetchAndPostPDF() {
             return;
         }
         
-        // 從PDF內容提取日期
-        const extractedDateInfo = extractDateFromPDF(rawText);
-        let dateString;
+        // 使用前一個週日的日期作為標題
+        const previousSunday = getPreviousSunday();
+        const dateString = previousSunday.toLocaleDateString('zh-TW', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long'
+        });
         
-        if (extractedDateInfo) {
-            dateString = formatChineseDate(extractedDateInfo.date, extractedDateInfo.weekday);
-            console.log('使用PDF中的日期:', dateString);
-        } else {
-            // 如果無法提取，使用當前日期
-            const now = new Date();
-            dateString = formatChineseDate(now);
-            console.log('使用當前日期:', dateString);
-        }
-        
-        // 發送標題訊息（使用提取的日期）
         await channel.send(`📄 **${dateString} 中央廚房菜單**\n🔗 原始連結: ${pdfLink}\n\n**📋 菜單內容:**`);
         
         // 分割並發送文字內容
@@ -345,6 +266,8 @@ client.once('ready', () => {
     });
     
     console.log('已設定定時任務: 每週五中午12點 (台北時間)');
+    
+    // 測試連線
     console.log('機器人啟動成功，所有功能已就緒！');
 });
 
@@ -363,19 +286,32 @@ client.on('messageCreate', async (message) => {
         await message.reply('✅ 機器人正常運作中！');
     }
     
+    // 測試日期計算
+    if (message.content === '!date' && message.channelId === CHANNEL_ID) {
+        const previousSunday = getPreviousSunday();
+        const dateString = previousSunday.toLocaleDateString('zh-TW', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long'
+        });
+        await message.reply(`📅 前一個週日是：${dateString}`);
+    }
+    
     // 幫助指令
     if (message.content === '!help' && message.channelId === CHANNEL_ID) {
         await message.reply(`
 📖 **可用指令：**
 • \`!pdf\` - 手動下載並發布PDF
 • \`!test\` - 測試機器人狀態
+• \`!date\` - 測試前一個週日日期計算
 • \`!help\` - 顯示此幫助訊息
 
 ⏰ **自動執行：**
 • 每週五中午12點自動下載並發布PDF
 
-🔍 **新功能：**
-• 自動從PDF內容中提取實際日期作為標題
+📅 **日期顯示：**
+• 標題會自動顯示前一個週日的日期
         `);
     }
 });
