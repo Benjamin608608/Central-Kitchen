@@ -6,7 +6,7 @@ const cron = require('node-cron');
 
 // 環境變數設定
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [process.env.CHANNEL_ID];
 const TARGET_URL = 'https://www.blessing.org.tw/%E4%B8%AD%E5%A4%AE%E5%BB%9A%E6%88%BF';
 
 // 創建Discord客戶端
@@ -317,21 +317,26 @@ function splitMessage(text, maxLength = 1900) {
     return messages.length > 0 ? messages : ['無內容'];
 }
 
-// 主要功能函數
-async function fetchAndPostPDF() {
+// 主要功能函數 - 支援指定頻道或所有頻道
+async function fetchAndPostPDF(targetChannelId = null) {
     try {
         console.log('開始執行PDF下載與發布任務...');
         
-        const channel = await client.channels.fetch(CHANNEL_ID);
-        if (!channel) {
-            console.error('找不到指定的頻道');
-            return;
-        }
+        // 決定要發布到哪些頻道
+        const channelsToPost = targetChannelId ? [targetChannelId] : CHANNEL_IDS;
         
-        // 獲取PDF連結（移除開始訊息）
+        // 先下載和處理PDF（只做一次）
         const pdfLink = await getPDFLink();
         if (!pdfLink) {
-            await channel.send('❌ 無法找到PDF連結');
+            // 如果有指定頻道，只發送給該頻道；否則發送給所有頻道
+            for (const channelId of channelsToPost) {
+                try {
+                    const channel = await client.channels.fetch(channelId);
+                    await channel.send('❌ 無法找到PDF連結');
+                } catch (error) {
+                    console.error(`無法發送錯誤訊息到頻道 ${channelId}:`, error.message);
+                }
+            }
             return;
         }
         
@@ -345,11 +350,18 @@ async function fetchAndPostPDF() {
         const formattedText = formatText(rawText);
         
         if (!formattedText.trim()) {
-            await channel.send('❌ PDF文字提取失敗或內容為空');
+            for (const channelId of channelsToPost) {
+                try {
+                    const channel = await client.channels.fetch(channelId);
+                    await channel.send('❌ PDF文字提取失敗或內容為空');
+                } catch (error) {
+                    console.error(`無法發送錯誤訊息到頻道 ${channelId}:`, error.message);
+                }
+            }
             return;
         }
         
-        // 使用前一個週日的日期作為標題
+        // 準備要發送的內容
         const previousSunday = getPreviousSunday();
         const dateString = previousSunday.toLocaleDateString('zh-TW', {
             year: 'numeric',
@@ -358,17 +370,37 @@ async function fetchAndPostPDF() {
             weekday: 'long'
         });
         
-        await channel.send(`📄 **${dateString} 中央廚房菜單**\n🔗 原始連結: ${pdfLink}\n\n**📋 菜單內容:**`);
-        
-        // 分割並發送文字內容（不使用代碼區塊）
+        const titleMessage = `📄 **${dateString} 中央廚房菜單**\n🔗 原始連結: ${pdfLink}\n\n**📋 菜單內容:**`;
         const messages = splitMessage(formattedText);
         
-        for (let i = 0; i < messages.length; i++) {
-            await channel.send(messages[i]);
-            
-            // 避免觸發Discord的速率限制
-            if (i < messages.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+        // 發送到所有指定的頻道
+        for (const channelId of channelsToPost) {
+            try {
+                console.log(`開始發送到頻道: ${channelId}`);
+                const channel = await client.channels.fetch(channelId);
+                
+                // 發送標題
+                await channel.send(titleMessage);
+                
+                // 發送內容
+                for (let i = 0; i < messages.length; i++) {
+                    await channel.send(messages[i]);
+                    
+                    // 避免觸發Discord的速率限制
+                    if (i < messages.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+                
+                console.log(`成功發送到頻道: ${channelId}`);
+                
+                // 在頻道之間稍作延遲
+                if (channelsToPost.length > 1 && channelId !== channelsToPost[channelsToPost.length - 1]) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+            } catch (error) {
+                console.error(`發送到頻道 ${channelId} 時發生錯誤:`, error.message);
             }
         }
         
@@ -377,11 +409,15 @@ async function fetchAndPostPDF() {
     } catch (error) {
         console.error('執行任務時發生錯誤:', error);
         
-        try {
-            const channel = await client.channels.fetch(CHANNEL_ID);
-            await channel.send(`❌ 執行任務時發生錯誤: ${error.message}`);
-        } catch (channelError) {
-            console.error('發送錯誤訊息失敗:', channelError);
+        // 發送錯誤訊息到所有頻道
+        const channelsToPost = targetChannelId ? [targetChannelId] : CHANNEL_IDS;
+        for (const channelId of channelsToPost) {
+            try {
+                const channel = await client.channels.fetch(channelId);
+                await channel.send(`❌ 執行任務時發生錯誤: ${error.message}`);
+            } catch (channelError) {
+                console.error(`發送錯誤訊息到頻道 ${channelId} 失敗:`, channelError.message);
+            }
         }
     }
 }
@@ -411,18 +447,26 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     
-    // 手動觸發PDF下載
-    if (message.content === '!pdf' && message.channelId === CHANNEL_ID) {
-        await fetchAndPostPDF();
+    // 檢查是否在允許的頻道中
+    if (!CHANNEL_IDS.includes(message.channelId)) return;
+    
+    // 手動觸發PDF下載（只在當前頻道）
+    if (message.content === '!pdf') {
+        await fetchAndPostPDF(message.channelId);
+    }
+    
+    // 手動觸發PDF下載到所有頻道（管理員功能）
+    if (message.content === '!pdfall') {
+        await fetchAndPostPDF(); // 不指定頻道，發送到所有頻道
     }
     
     // 測試指令
-    if (message.content === '!test' && message.channelId === CHANNEL_ID) {
+    if (message.content === '!test') {
         await message.reply('✅ 機器人正常運作中！');
     }
     
     // 測試日期計算
-    if (message.content === '!date' && message.channelId === CHANNEL_ID) {
+    if (message.content === '!date') {
         const previousSunday = getPreviousSunday();
         const dateString = previousSunday.toLocaleDateString('zh-TW', {
             year: 'numeric',
@@ -433,17 +477,24 @@ client.on('messageCreate', async (message) => {
         await message.reply(`📅 前一個週日是：${dateString}`);
     }
     
+    // 顯示當前支援的頻道
+    if (message.content === '!channels') {
+        await message.reply(`📺 支援的頻道數量：${CHANNEL_IDS.length}\n頻道IDs：${CHANNEL_IDS.join(', ')}`);
+    }
+    
     // 幫助指令
-    if (message.content === '!help' && message.channelId === CHANNEL_ID) {
+    if (message.content === '!help') {
         await message.reply(`
 📖 **可用指令：**
-• \`!pdf\` - 手動下載並發布PDF
+• \`!pdf\` - 手動下載並發布PDF（僅當前頻道）
+• \`!pdfall\` - 手動下載並發布PDF（所有頻道）
 • \`!test\` - 測試機器人狀態
 • \`!date\` - 測試前一個週日日期計算
+• \`!channels\` - 顯示支援的頻道
 • \`!help\` - 顯示此幫助訊息
 
 ⏰ **自動執行：**
-• 每週五中午12點自動下載並發布PDF
+• 每週五中午12點自動下載並發布PDF到所有頻道
 
 📅 **日期顯示：**
 • 標題會自動顯示前一個週日的日期
